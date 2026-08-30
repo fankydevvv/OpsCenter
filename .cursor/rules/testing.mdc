@@ -1,0 +1,6 @@
+---
+description: Run detected test, build, or lint checks before declaring work done when safe and available.
+alwaysApply: true
+---
+
+Use the commands in `.cowork/learning/project_profile.md`. If a command cannot be run, state why and record the gap in `.cowork/diagnostics/`.

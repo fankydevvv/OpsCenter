@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "created_at": "2026-08-30T03:09:57+00:00",
+  "agents": [
+    "manager",
+    "business-analyst",
+    "odoo-business-analyst",
+    "architect",
+    "frontend-developer",
+    "backend-developer",
+    "odoo-developer",
+    "implementer",
+    "data-analyst-scientist",
+    "devsecops",
+    "reviewer",
+    "tester",
+    "debugger",
+    "documenter",
+    "trainer",
+    "memory-curator"
+  ],
+  "tools": [
+    "codex",
+    "claude-code",
+    "cursor",
+    "antigravity"
+  ],
+  "vendors": {
+    "codex": "openai",
+    "claude-code": "anthropic",
+    "cursor": "cursor",
+    "antigravity": "google"
+  },
+  "agent_id_format": "<tool>:<role>[#instance]",
+  "message_protocol_version": 2,
+  "default_layout": "manual",
+  "source_of_truth": ".cowork/core, .cowork/business, .cowork/knowledge, .cowork/documents, .cowork/templates, and .cowork/learning",
+  "generated_files_are_exports": true
+}

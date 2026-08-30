@@ -1,0 +1,26 @@
+{
+  "project_root": "D:\\source-code\\opspilot\\opscenter-backend",
+  "detected_at": "2026-08-30T03:10:29+00:00",
+  "os": "Windows-10-10.0.26200-SP0",
+  "languages": [
+    "java"
+  ],
+  "frameworks": [
+    "unknown"
+  ],
+  "package_manager": "maven",
+  "test_command": "mvn test",
+  "build_command": "mvn package",
+  "lint_command": "unknown",
+  "important_files": [
+    "pom.xml"
+  ],
+  "important_directories": [
+    "src"
+  ],
+  "notes": [],
+  "git": {
+    "is_repo": true,
+    "status": "dirty:\nA  .gitattributes\nA  .gitignore\nA  .mvn/wrapper/maven-wrapper.properties\nA  mvnw\nA  mvnw.cmd\nAM pom.xml\nAM src/main/java/com/opscenter/OpscenterBackendApplication.java\nA  src/main/resources/application.properties\nAM src/test/java/com/opscenter/OpscenterBackendApplicationTests.java\n?? .agent/\n?? .claude/\n?? .cowork/\n?? .cursor/\n?? AGENTS.md\n?? CLAUDE.md\n?? GEMINI.md"
+  }
+}

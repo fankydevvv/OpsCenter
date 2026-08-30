@@ -1,0 +1,6 @@
+---
+description: Use .cowork learning files as project memory for known errors, successful fixes, failed attempts, and rules.
+alwaysApply: true
+---
+
+Before debugging or implementation, check `.cowork/business/requirements.md`, `.cowork/business/notes.md`, `.cowork/business/acceptance_criteria.md`, `.cowork/learning/known_errors.md`, `.cowork/learning/successful_fixes.md`, `.cowork/learning/failed_attempts.md`, and `.cowork/training/project_rules.md`.

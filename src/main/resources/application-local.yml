@@ -1,0 +1,24 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5433/opscenter
+    username: opscenter
+    password: opscenter
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+
+  data:
+    redis:
+      host: localhost
+      port: 6467
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: opscenter
+    password: opscenter
