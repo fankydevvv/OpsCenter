@@ -1,0 +1,14 @@
+target/
+.git/
+.idea/
+.vscode/
+.cowork/
+.agent/
+.claude/
+.claude-flow/
+.cursor/
+*.iml
+*.md
+!README.md
+.env
+.env.*

@@ -1,24 +1,37 @@
+# ---------------------------------------------------------------------------
+# Profile "local" - developer workstation running the infra from the root
+# docker-compose.yml (PostgreSQL 5433, Redis 6467, RabbitMQ 5672).
+#
+# !!! DEV-ONLY DEFAULTS !!!
+# Every value below is a placeholder for a laptop and can be overridden by the
+# environment variable named in ${...}. None of these values may be used in
+# DEMO/PROD (05-DEPLOY §9): the "dev" profile has no defaults at all.
+# ---------------------------------------------------------------------------
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5433/opscenter
-    username: opscenter
-    password: opscenter
-
-  jpa:
-    hibernate:
-      ddl-auto: validate
-    open-in-view: false
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5433/opscenter}
+    username: ${DATABASE_USERNAME:opscenter}
+    password: ${DATABASE_PASSWORD:opscenter}   # DEV-ONLY
 
   flyway:
-    enabled: true
+    # local = the only profile besides "test" that seeds the four DEV accounts
+    # (admin/Admin@123 ...) from classpath:db/seed-dev (D-27).
+    locations: classpath:db/migration,classpath:db/seed-dev
 
   data:
     redis:
-      host: localhost
-      port: 6467
+      url: ${REDIS_URL:redis://:opscenter@localhost:6467}   # DEV-ONLY password (docker-compose REDIS_PASSWORD)
 
   rabbitmq:
-    host: localhost
-    port: 5672
-    username: opscenter
-    password: opscenter
+    addresses: ${RABBITMQ_URL:amqp://opscenter:opscenter@localhost:5672}   # DEV-ONLY credentials
+
+opscenter:
+  security:
+    jwt:
+      # DEV-ONLY HS256 secret (>= 32 chars). Override with OPSCENTER_JWT_SECRET.
+      secret: ${OPSCENTER_JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
+
+logging:
+  level:
+    com.opscenter: DEBUG
+    org.springframework.security: INFO

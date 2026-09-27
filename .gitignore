@@ -31,3 +31,18 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Agent workspaces (not part of the product) ###
+.cowork
+.agent
+.claude
+.claude-flow
+.cursor
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
+
+### Local secrets ###
+.env
+.env.*
+!.env.example

@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# Profile "test" - automated tests only.
+#
+# There is NO datasource URL here on purpose: every integration test gets its
+# PostgreSQL (and RabbitMQ) from Testcontainers through @ServiceConnection, so a
+# test can never migrate the developer database on localhost:5433.
+# ---------------------------------------------------------------------------
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    # Tests need the four DEV accounts of 07-TC §5 as fixtures (D-27).
+    locations: classpath:db/migration,classpath:db/seed-dev
+
+management:
+  health:
+    redis:
+      enabled: false    # Redis is not used by the base and not started in tests
+    rabbit:
+      enabled: false    # only OutboxRelayIT starts a broker
+
+opscenter:
+  security:
+    jwt:
+      secret: test-only-secret-not-for-real-use-0123456789
+  outbox:
+    relay:
+      enabled: false    # tests call OutboxRelay.relayOnce() explicitly
+  idempotency:
+    purge:
+      enabled: false    # tests call IdempotencyKeyStore.purgeExpired() explicitly
+
+logging:
+  level:
+    com.opscenter: DEBUG
+    org.testcontainers: INFO
+    com.github.dockerjava: WARN

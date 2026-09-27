@@ -1,0 +1,42 @@
+# CI for the backend repository (05-DEPLOY §11, D-25).
+# ubuntu-latest runners have Docker, which Testcontainers needs for the
+# PostgreSQL/RabbitMQ integration tests.
+name: backend-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same branch/PR cancels the run it supersedes.
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # A hung image pull or integration test must not hold the runner for GitHub's 6-hour default.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build and test (unit + WebMvc slices + Testcontainers ITs)
+        run: mvn -B -ntp verify
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports
+          if-no-files-found: ignore
+
+      - name: Build Docker image
+        run: docker build -t opscenter-backend:ci .

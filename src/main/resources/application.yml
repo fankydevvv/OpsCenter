@@ -1,3 +1,10 @@
+# ---------------------------------------------------------------------------
+# OpsCenter backend - profile-independent configuration.
+#
+# Rules (05-DEPLOY §9): this file never contains a secret or a host-specific
+# address. Those live in application-local.yml (developer machine, DEV-ONLY
+# defaults) or application-dev.yml (container, env-only).
+# ---------------------------------------------------------------------------
 spring:
   application:
     name: opscenter-backend
@@ -5,8 +12,55 @@ spring:
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
 
+  jpa:
+    # The schema is owned by Flyway (05-DEPLOY §10). Hibernate only checks that the
+    # entity mapping matches the migrated tables and fails fast on drift.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        # 03-DB §3.2: every instant is stored as TIMESTAMPTZ in UTC.
+        jdbc.time_zone: UTC
+
+  flyway:
+    enabled: true
+    # Schema + reference data only. The DEV/TEST accounts with well-known passwords
+    # live in classpath:db/seed-dev, which ONLY application-local.yml and
+    # application-test.yml add to this list (D-27). The container profile "dev"
+    # therefore never seeds them; its first ADMIN comes from
+    # OPSCENTER_BOOTSTRAP_ADMIN_PASSWORD (see opscenter.security.bootstrap-admin).
+    locations: classpath:db/migration
+    validate-on-migrate: true
+
+  rabbitmq:
+    # An unreachable (not refused) broker must not block the outbox relay - and the row
+    # locks it holds - for the RabbitMQ client default of 60 s per attempt (D-28).
+    connection-timeout: 5s
+
+  data:
+    web:
+      pageable:
+        # 04-API §2.4: page/size/sort query parameters, size capped at 100.
+        default-page-size: 20
+        max-page-size: 100
+        one-indexed-parameters: false
+
+  jackson:
+    # 04-API §2.3 sample bodies use ISO-8601 UTC timestamps ("2026-09-26T04:00:00Z").
+    time-zone: UTC
+
 server:
   port: ${SERVER_PORT:8746}
+  # Client IP for audit_logs.source_ip / login_attempts.ip_address (03-DB §21, D-30).
+  # "none" = the TCP peer address is used and X-Forwarded-For is IGNORED, because anybody
+  # can send that header. Once a reverse proxy exists (nginx, 05-DEPLOY §13) set
+  # OPSCENTER_FORWARD_HEADERS=native and OPSCENTER_TRUSTED_PROXIES to a regex of the
+  # proxy's IP(s): Tomcat then rewrites getRemoteAddr() from the header for those peers only.
+  forward-headers-strategy: ${OPSCENTER_FORWARD_HEADERS:none}
+  tomcat:
+    remoteip:
+      internal-proxies: '${OPSCENTER_TRUSTED_PROXIES:127\.0\.0\.1}'
 
 management:
   endpoints:
@@ -17,7 +71,64 @@ management:
           - info
           - metrics
           - prometheus
-
   endpoint:
     health:
+      # Component details (DB/Redis/RabbitMQ product + version) only for administrators;
+      # everyone else sees {"status":"UP"} (05-DEPLOY §13 "monitoring not public by default").
       show-details: when_authorized
+      roles: ADMIN
+      probes:
+        enabled: true
+  metrics:
+    distribution:
+      # Publish http_server_requests_seconds_bucket so the Grafana dashboard shipped in
+      # deploy/grafana can compute p95 latency with histogram_quantile (05-DEPLOY §15).
+      percentiles-histogram:
+        http.server.requests: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+
+opscenter:
+  security:
+    jwt:
+      # Secret is profile/env specific (see application-local.yml / application-dev.yml).
+      issuer: opscenter
+      access-ttl: PT30M   # 04-API §3.1 expiresIn = 1800 s
+      refresh-ttl: P7D
+    login:
+      # D-09 brute-force brake: this many failed attempts for one login inside the window
+      # answer 429 AUTH_TOO_MANY_ATTEMPTS (LoginRateLimiter).
+      max-failures: 5
+      window: PT15M
+    bootstrap-admin:
+      # First administrator of an environment that has no seeded accounts (D-27).
+      # Created once at start-up when no ACTIVE user holds role ADMIN and the password
+      # is set; never touched again afterwards. The password must not be committed:
+      # pass it as OPSCENTER_BOOTSTRAP_ADMIN_PASSWORD.
+      username: admin
+      email: admin@opscenter.local
+      display-name: Administrator
+      password: ${OPSCENTER_BOOTSTRAP_ADMIN_PASSWORD:}
+  outbox:
+    relay:
+      enabled: true
+      delay: PT2S
+      batch-size: 50
+      # Exponential backoff (D-28): 2 s, 4 s, 8 s ... capped at 5 min; 100 attempts span
+      # roughly eight hours of broker outage before a row is parked as FAILED.
+      max-retries: 100
+      initial-backoff: PT2S
+      max-backoff: PT5M
+  idempotency:
+    # How long a completed Idempotency-Key replays the original answer (03-DB §25).
+    ttl: PT24H
+    purge:
+      # Hourly retention job deleting keys past expires_at (IdempotencyKeyPurgeScheduler).
+      enabled: true
+      delay: PT1H

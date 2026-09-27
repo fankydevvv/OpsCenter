@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# Profile "dev" - the backend running INSIDE a container (docker-compose.app.yml).
+#
+# Everything is read from environment variables named per 05-DEPLOY §9 and there
+# is deliberately NO default: a missing variable fails the start-up instead of
+# silently connecting to a developer database with a well-known password.
+# No DEV accounts are seeded here (D-27): set OPSCENTER_BOOTSTRAP_ADMIN_PASSWORD
+# for the first start to create the administrator.
+# ---------------------------------------------------------------------------
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+
+  data:
+    redis:
+      url: ${REDIS_URL}
+
+  rabbitmq:
+    addresses: ${RABBITMQ_URL}
+
+opscenter:
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+
+# The OpenAPI document and Swagger UI describe every endpoint, DTO and permission code;
+# that is developer tooling, not something an anonymous DEMO visitor should read
+# (05-DEPLOY §13, §19). They stay enabled in the "local" profile.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+logging:
+  level:
+    com.opscenter: INFO
