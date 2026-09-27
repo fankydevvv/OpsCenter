@@ -33,7 +33,25 @@
             3.x is the line built for Spring Boot 4 / Spring Framework 7 / Jackson 3.
         -->
         <springdoc.version>3.1.1</springdoc.version>
+        <!--
+            AWS SDK for Java v2 is not managed by the Spring Boot BOM either. It is the S3 client behind
+            the ObjectStorage port (blueprint D-41): S3 is the vendor-neutral protocol MinIO speaks, and
+            unlike io.minio:minio it does not drag Jackson 2 / Guava / OkHttp onto the classpath (R-01).
+        -->
+        <aws-sdk.version>2.55.6</aws-sdk.version>
     </properties>
+    <dependencyManagement>
+        <dependencies>
+            <!-- Imported after the Boot parent: Boot manages no software.amazon.awssdk artifact, so nothing clashes. -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws-sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -95,6 +113,34 @@
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>${springdoc.version}</version>
+        </dependency>
+
+        <!--
+            Object storage (MinIO in DEV, any S3-compatible store later - 05-DEPLOY §8, blueprint D-41).
+            The default HTTP engines (Netty for async, Apache for sync) are excluded: the adapter is
+            synchronous and the JDK-based url-connection-client is small and dependency-free.
+        -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache5-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
         </dependency>
 
         <dependency>

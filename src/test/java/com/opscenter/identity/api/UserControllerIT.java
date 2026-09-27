@@ -313,19 +313,26 @@ class UserControllerIT extends IdentityIntegrationTest {
     @Test
     void roleAndPermissionCatalogues_areReadableWithTheRightPermission() throws Exception {
         String admin = adminToken();
+        // Later modules add permissions with their own migrations (V007.1 service.* / system.read ...),
+        // so the expected sizes come from the catalogue instead of a hard-coded 16.
+        int catalogue = jdbc.queryForObject("select count(*) from permissions", Integer.class);
+        int engineer = jdbc.queryForObject("select count(*) from role_permissions rp join roles r on r.id = rp.role_id "
+                + "where r.code = 'ENGINEER'", Integer.class);
+        String firstCode = jdbc.queryForObject("select min(code) from permissions", String.class);
 
         mvc.perform(get("/api/v1/roles").header("Authorization", bearer(admin)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[*].code", hasItems("ADMIN", "COORDINATOR", "ENGINEER")))
-                .andExpect(jsonPath("$[?(@.code == 'ADMIN')].permissions[*]", hasSize(16)))
-                .andExpect(jsonPath("$[?(@.code == 'ENGINEER')].permissions[*]", hasSize(2)));
+                .andExpect(jsonPath("$[?(@.code == 'ADMIN')].permissions[*]", hasSize(catalogue)))
+                .andExpect(jsonPath("$[?(@.code == 'ENGINEER')].permissions[*]", hasSize(engineer)))
+                .andExpect(jsonPath("$[?(@.code == 'ENGINEER')].permissions[*]", hasItems("organization.read", "team.read")));
         mvc.perform(get("/api/v1/permissions").header("Authorization", bearer(admin)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(16)))
-                .andExpect(jsonPath("$[*].code", hasItems("user.delete", "team.member.manage")))
-                .andExpect(jsonPath("$[0].code").value("organization.read"))
-                .andExpect(jsonPath("$[0].resource").value("organization"))
-                .andExpect(jsonPath("$[0].action").value("read"));
+                .andExpect(jsonPath("$", hasSize(catalogue)))
+                .andExpect(jsonPath("$[*].code", hasItems("user.delete", "team.member.manage", "organization.read")))
+                .andExpect(jsonPath("$[0].code").value(firstCode))
+                .andExpect(jsonPath("$[?(@.code == 'organization.read')].resource", hasItems("organization")))
+                .andExpect(jsonPath("$[?(@.code == 'organization.read')].action", hasItems("read")));
         mvc.perform(get("/api/v1/roles").header("Authorization", bearer(coordinatorToken())))
                 .andExpect(status().isOk());
     }

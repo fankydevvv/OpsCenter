@@ -11,6 +11,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import com.opscenter.identity.testsupport.IdentityIntegrationTest;
+import com.opscenter.support.TestJwts;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -21,6 +22,7 @@ import tools.jackson.databind.JsonNode;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -45,8 +47,12 @@ class AuthControllerIT extends IdentityIntegrationTest {
         assertThat(body.get("expiresIn").asLong()).isEqualTo(1800);
         assertThat(body.get("user").get("id").asString()).isEqualTo(ADMIN_ID.toString());
         assertThat(body.get("user").get("roles").get(0).asString()).isEqualTo("ADMIN");
-        // 15 base permissions (blueprint §6.2) + user.delete (V006, D-26)
-        assertThat(body.get("user").get("permissions").size()).isEqualTo(16);
+        // ADMIN holds every permission of the catalogue: the 15 base codes (blueprint §6.2), user.delete
+        // (V006, D-26) and those added by later modules' migrations (V007.1 service.*, system.read ...).
+        assertThat(body.get("user").get("permissions").size())
+                .isEqualTo(jdbc.queryForObject("select count(*) from permissions", Integer.class));
+        assertThat(body.get("user").get("permissions")).extracting(JsonNode::asString)
+                .containsAll(TestJwts.ALL_BASE_PERMISSIONS);
 
         Integer activeSessions = jdbc.queryForObject(
                 "select count(*) from user_sessions where user_id = ? and revoked_at is null", Integer.class, ADMIN_ID);
@@ -66,8 +72,10 @@ class AuthControllerIT extends IdentityIntegrationTest {
     void TC_AUTH_001_loginByEmail_worksCaseInsensitively() throws Exception {
         JsonNode body = login("Engineer.A@OpsCenter.local", ENGINEER_PASSWORD);
         assertThat(body.get("user").get("username").asString()).isEqualTo("engineer.a");
+        // Base identity/organization rights of ENGINEER; later modules add their own (service.read ...).
         assertThat(body.get("user").get("permissions")).extracting(JsonNode::asString)
-                .containsExactly("organization.read", "team.read");
+                .contains("organization.read", "team.read")
+                .doesNotContain("user.read", "team.create", "role.read");
     }
 
     @Test
@@ -261,7 +269,7 @@ class AuthControllerIT extends IdentityIntegrationTest {
                 .andExpect(jsonPath("$.email").value("engineer.a@opscenter.local"))
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.roles", containsInAnyOrder("ENGINEER")))
-                .andExpect(jsonPath("$.permissions", containsInAnyOrder("organization.read", "team.read")))
+                .andExpect(jsonPath("$.permissions", hasItems("organization.read", "team.read")))
                 .andExpect(jsonPath("$.permissions", not(hasItem("user.read"))))
                 .andExpect(jsonPath("$.teams[0].code").value("PAYMENT"))
                 .andExpect(jsonPath("$.teams[0].memberType").value("PRIMARY"));

@@ -1,5 +1,6 @@
 # ---------------------------------------------------------------------------
-# Profile "dev" - the backend running INSIDE a container (docker-compose.app.yml).
+# Profile "dev" - the backend running INSIDE a container (docker-compose.yml,
+# service "backend").
 #
 # Everything is read from environment variables named per 05-DEPLOY §9 and there
 # is deliberately NO default: a missing variable fails the start-up instead of
@@ -13,6 +14,12 @@ spring:
     username: ${DATABASE_USERNAME}
     password: ${DATABASE_PASSWORD}
 
+  flyway:
+    # Schema only by default; docker-compose.yml sets
+    # OPSCENTER_FLYWAY_LOCATIONS=classpath:db/migration,classpath:db/seed-demo so the demo
+    # services (odoo-erp ...) exist - but never db/seed-dev and its published passwords (D-64).
+    locations: ${OPSCENTER_FLYWAY_LOCATIONS:classpath:db/migration}
+
   data:
     redis:
       url: ${REDIS_URL}
@@ -24,6 +31,13 @@ opscenter:
   security:
     jwt:
       secret: ${JWT_SECRET}
+
+  storage:
+    # Required when opscenter.storage.enabled=true (the default). OBJECT_STORAGE_* is what
+    # docker-compose.yml passes; MINIO_* is accepted as an alias.
+    endpoint: ${OBJECT_STORAGE_ENDPOINT:${MINIO_ENDPOINT}}
+    access-key: ${OBJECT_STORAGE_ACCESS_KEY:${MINIO_ACCESS_KEY}}
+    secret-key: ${OBJECT_STORAGE_SECRET_KEY:${MINIO_SECRET_KEY}}
 
 # The OpenAPI document and Swagger UI describe every endpoint, DTO and permission code;
 # that is developer tooling, not something an anonymous DEMO visitor should read

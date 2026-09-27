@@ -39,6 +39,12 @@ spring:
     connection-timeout: 5s
 
   data:
+    redis:
+      # Redis is short-lived coordination only (05-DEPLOY §23.1): lock, resolution cache,
+      # rate limit - all fail-open (D-50..D-53). Short timeouts make a dead Redis fall back
+      # to PostgreSQL within ~2 s instead of Lettuce's 60 s command timeout.
+      timeout: 2s
+      connect-timeout: 2s
     web:
       pageable:
         # 04-API §2.4: page/size/sort query parameters, size capped at 100.
@@ -79,6 +85,13 @@ management:
       roles: ADMIN
       probes:
         enabled: true
+      group:
+        readiness:
+          # D-62: the container is "ready" when it can serve requests, i.e. PostgreSQL works.
+          # Redis (-> PostgreSQL fallback), MinIO (ingestion continues, archived=false) and
+          # RabbitMQ (outbox keeps events PENDING) have fallbacks, so their outage shows in
+          # /actuator/health and /api/v1/system/status but never marks the container unhealthy.
+          include: readinessState,db
   metrics:
     distribution:
       # Publish http_server_requests_seconds_bucket so the Grafana dashboard shipped in
@@ -132,3 +145,74 @@ opscenter:
       # Hourly retention job deleting keys past expires_at (IdempotencyKeyPurgeScheduler).
       enabled: true
       delay: PT1H
+
+  # --- Object storage (MinIO / any S3-compatible store; blueprint D-41, D-42) -------------
+  # Endpoint and credentials are profile specific (application-local.yml: DEV-ONLY defaults;
+  # application-dev.yml: env only). OBJECT_STORAGE_* is the name used by docker-compose.yml,
+  # MINIO_* is accepted as an alias.
+  storage:
+    enabled: ${OBJECT_STORAGE_ENABLED:true}
+    bucket: ${OBJECT_STORAGE_BUCKET:${MINIO_BUCKET:opscenter-raw}}
+    region: ${OBJECT_STORAGE_REGION:us-east-1}   # MinIO ignores it, the S3 signature needs one
+    path-style: true                             # http://host:9000/<bucket>/<key>, no DNS per bucket
+    raw-retention: P180D                         # lifecycle rule of the raw bucket (03-DB §25)
+    connect-timeout: PT2S
+    socket-timeout: PT5S
+    api-call-timeout: PT10S
+    # Budget of HEAD+PUT when a webhook body is archived. Well below Alertmanager's 10 s webhook
+    # timeout: a hanging store must cost the delivery ~2 s, not a timeout + retry loop (D-42).
+    archive-timeout: PT2S
+    # The retention lifecycle rule applies to this prefix only (D-42; the archive writes
+    # alertmanager/yyyy/MM/dd/<sha256>.json). Other rules of the bucket are left alone.
+    raw-retention-prefix: alertmanager/
+
+  # --- Service Catalog (01-SRS §4; blueprint D-33, D-48, D-52) ----------------------------
+  service-catalog:
+    resolution:
+      # Labels that carry the service code / environment of an alert, first non-blank wins
+      # (D-44). The service code must equal services.code; the environment is normalised
+      # with the aliases of D-33 (PROD -> PRODUCTION ...).
+      service-label-keys: [service, service_name, app]
+      environment-label-keys: [environment, env]
+      # Redis hash opscenter:svc-resolve:v1:{orgId}:{serviceCode} (D-52). Deleted after commit
+      # whenever the service, one of its environments or its ownership changes.
+      cache-enabled: true
+      cache-ttl: PT10M
+      # A "no such service" answer lives only briefly: written just after the service was
+      # registered, a stale negative entry would keep its alerts UNMAPPED for the full TTL.
+      negative-cache-ttl: PT30S
+
+  # --- Inbound Alertmanager webhook (consumed by the integration module; D-39, D-43, D-53) -
+  integration:
+    alertmanager:
+      # Shared secret, >= 32 chars; referenced by integration_sources.secret_ref
+      # 'env:OPSCENTER_ALERTMANAGER_TOKEN'. Never stored in the database (03-DB §3.6).
+      token: ${OPSCENTER_ALERTMANAGER_TOKEN:}
+      max-payload-bytes: 1048576
+      max-alerts-per-request: 500
+      idempotency-ttl: PT15M
+      rate-limit-per-minute: 600
+      auth-failure-limit-per-minute: 20
+
+  # --- Alert normalisation / correlation (consumed by the alert module; D-45..D-54) -------
+  alert:
+    severity-map: {critical: P1, high: P2, error: P2, major: P2, warning: P3, medium: P3, minor: P3, info: P4, low: P4, none: P4}
+    default-severity: P3
+    reopen-window: PT24H       # PT0S disables the automatic REOPENED
+    lock:
+      ttl: PT15S
+      wait: PT5S
+
+  # --- Redis circuit breaker (D-50..D-53) ----------------------------------------------------
+  redis:
+    # After a Redis failure, lock/rate limit/resolution cache skip Redis for this long and use
+    # their fallbacks directly (PostgreSQL advisory lock, fail-open, read PostgreSQL).
+    cool-down: PT30S
+
+  # --- GET /api/v1/system/status (D-63) ----------------------------------------------------
+  system:
+    probes:
+      timeout: PT2S
+      # Blank = component reported as UNKNOWN (R-32); the container profile sets both.
+      prometheus-url: ${OPSCENTER_PROMETHEUS_URL:}
+      alertmanager-url: ${OPSCENTER_ALERTMANAGER_URL:}

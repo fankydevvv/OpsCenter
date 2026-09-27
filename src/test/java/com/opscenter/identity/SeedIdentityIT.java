@@ -31,16 +31,28 @@ class SeedIdentityIT extends AbstractIntegrationTest {
                 "V005_1__seed_dev_accounts.sql", "V006__review_fixes.sql");
     }
 
+    /**
+     * The base seed only: later modules add permissions for their own resources with their own
+     * migrations (V007.1: service.*, system.read ...), so the counts are restricted to the base
+     * resources and ADMIN is checked to hold the whole catalogue.
+     */
     @Test
     void permissionsRolesAndMappingsMatchTheBlueprint() {
-        assertThat(jdbc.queryForObject("select count(*) from permissions", Integer.class)).isEqualTo(16);
+        String baseResources = "p.resource in ('user', 'role', 'permission', 'organization', 'team')";
+        assertThat(jdbc.queryForObject("select count(*) from permissions p where " + baseResources, Integer.class))
+                .isEqualTo(16);
         Map<String, Integer> byRole = Map.of("ADMIN", 16, "COORDINATOR", 8, "ENGINEER", 2);
         byRole.forEach((role, expected) -> assertThat(jdbc.queryForObject(
-                "select count(*) from role_permissions rp join roles r on r.id = rp.role_id where r.code = ?",
+                "select count(*) from role_permissions rp join roles r on r.id = rp.role_id "
+                        + "join permissions p on p.id = rp.permission_id where r.code = ? and " + baseResources,
                 Integer.class, role)).as(role).isEqualTo(expected));
+        assertThat(jdbc.queryForObject(
+                "select count(*) from role_permissions rp join roles r on r.id = rp.role_id where r.code = 'ADMIN'",
+                Integer.class)).as("ADMIN holds every permission")
+                .isEqualTo(jdbc.queryForObject("select count(*) from permissions", Integer.class));
         assertThat(jdbc.queryForList(
                 "select p.code from role_permissions rp join roles r on r.id = rp.role_id join permissions p on p.id = rp.permission_id "
-                        + "where r.code = 'ENGINEER' order by p.code", String.class))
+                        + "where r.code = 'ENGINEER' and " + baseResources + " order by p.code", String.class))
                 .containsExactly("organization.read", "team.read");
         // D-26: user.delete exists and belongs to ADMIN only
         assertThat(jdbc.queryForList(

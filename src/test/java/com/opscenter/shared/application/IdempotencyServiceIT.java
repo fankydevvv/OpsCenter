@@ -145,6 +145,27 @@ class IdempotencyServiceIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void reclaimingAFailedKey_isAtomic_onlyOneOfTwoRetriesWins() {
+        // Review finding: two identical retries that both saw the key FAILED both restarted it and
+        // both ran the operation. The takeover is now a conditional UPDATE.
+        FakeCreate op = new FakeCreate();
+        op.failWith = new BusinessRuleException("TEAM_RULE_BROKEN", "not today");
+        String hash = service.hashOf(Map.of("code", "R"));
+        assertThatThrownBy(() -> service.execute("key-race", hash, "Team", op)).isInstanceOf(BusinessRuleException.class);
+        UUID keyId = repository.findByIntegrationIdIsNullAndIdempotencyKey("key-race").orElseThrow().getId();
+
+        boolean first = store.reclaim(keyId, hash, "Team");
+        boolean second = store.reclaim(keyId, hash, "Team");
+
+        assertThat(first).isTrue();
+        assertThat(second).as("the key is IN_PROGRESS now - the second retry must not run the operation").isFalse();
+        assertThat(repository.findById(keyId).orElseThrow().getStatus()).isEqualTo(IdempotencyStatus.IN_PROGRESS);
+        // the loser is answered like any duplicate of a request in progress
+        assertThatThrownBy(() -> service.execute("key-race", hash, "Team", new FakeCreate()))
+                .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
     void unexpectedFailure_isRecordedAs500() {
         FakeCreate op = new FakeCreate();
         op.failWith = new IllegalStateException("db hiccup");

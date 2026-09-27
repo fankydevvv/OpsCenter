@@ -44,8 +44,15 @@ public class IdempotencyKeyStore {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public IdempotencyKeyEntity insertInProgress(UUID integrationId, String key, String requestHash,
                                                  String resourceType) {
+        return insertInProgress(integrationId, key, requestHash, resourceType, null);
+    }
+
+    /** @param keyTtl lifetime of this key; {@code null} = the default {@code opscenter.idempotency.ttl} (D-43) */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public IdempotencyKeyEntity insertInProgress(UUID integrationId, String key, String requestHash,
+                                                 String resourceType, Duration keyTtl) {
         IdempotencyKeyEntity entity = new IdempotencyKeyEntity(UUID.randomUUID(), integrationId, key,
-                requestHash, resourceType, clock.instant(), clock.instant().plus(ttl));
+                requestHash, resourceType, clock.instant(), clock.instant().plus(effective(keyTtl)));
         return repository.saveAndFlush(entity);
     }
 
@@ -69,9 +76,30 @@ public class IdempotencyKeyStore {
         repository.findById(id).ifPresent(k -> k.fail(responseCode));
     }
 
+    /** @return {@code true} when this caller took the key over (see the 4-argument variant) */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void reclaim(UUID id, String requestHash, String resourceType) {
-        repository.findById(id).ifPresent(k -> k.restart(requestHash, resourceType, clock.instant().plus(ttl)));
+    public boolean reclaim(UUID id, String requestHash, String resourceType) {
+        return reclaim(id, requestHash, resourceType, null);
+    }
+
+    /**
+     * Restarts a FAILED or expired key for a new attempt - but only if it is <em>still</em> FAILED or
+     * expired at this moment (conditional {@code UPDATE}). Two identical retries that both found the
+     * key free can therefore never both run the operation (review finding: the second one would count
+     * an extra occurrence and overwrite {@code resource_id}).
+     *
+     * @param keyTtl lifetime of the reclaimed key; {@code null} = the default TTL
+     * @return {@code true} when this caller owns the key now; {@code false} = somebody else was faster
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean reclaim(UUID id, String requestHash, String resourceType, Duration keyTtl) {
+        Instant now = clock.instant();
+        return repository.reclaimIfFree(id, requestHash, resourceType, now.plus(effective(keyTtl)), now,
+                IdempotencyStatus.IN_PROGRESS, IdempotencyStatus.FAILED) == 1;
+    }
+
+    private Duration effective(Duration keyTtl) {
+        return keyTtl == null ? ttl : keyTtl;
     }
 
     /**

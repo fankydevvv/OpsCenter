@@ -1,6 +1,7 @@
 # ---------------------------------------------------------------------------
 # Profile "local" - developer workstation running the infra from the root
-# docker-compose.yml (PostgreSQL 5433, Redis 6467, RabbitMQ 5672).
+# docker-compose.yml (PostgreSQL 5433, Redis 6467, RabbitMQ 5672, MinIO 9002,
+# Prometheus 9090, Alertmanager 9093).
 #
 # !!! DEV-ONLY DEFAULTS !!!
 # Every value below is a placeholder for a laptop and can be overridden by the
@@ -8,28 +9,47 @@
 # DEMO/PROD (05-DEPLOY §9): the "dev" profile has no defaults at all.
 # ---------------------------------------------------------------------------
 spring:
+  config:
+    # The root .env (written by scripts/dev-up.*) is read as a properties file, so a backend
+    # started from the IDE sees the SAME OPSCENTER_ALERTMANAGER_TOKEN / MINIO_ROOT_* / REDIS_PASSWORD
+    # as the containers without exporting anything by hand. Optional: no .env, no problem.
+    import: optional:file:../.env[.properties]
+
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5433/opscenter}
-    username: ${DATABASE_USERNAME:opscenter}
-    password: ${DATABASE_PASSWORD:opscenter}   # DEV-ONLY
+    # DATABASE_* wins; otherwise the POSTGRES_* values of the root .env (same as the container), then DEV defaults.
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:${POSTGRES_PORT:5433}/${POSTGRES_DB:opscenter}}
+    username: ${DATABASE_USERNAME:${POSTGRES_USER:opscenter}}
+    password: ${DATABASE_PASSWORD:${POSTGRES_PASSWORD:opscenter}}   # DEV-ONLY
 
   flyway:
     # local = the only profile besides "test" that seeds the four DEV accounts
-    # (admin/Admin@123 ...) from classpath:db/seed-dev (D-27).
-    locations: classpath:db/migration,classpath:db/seed-dev
+    # (admin/Admin@123 ...) from classpath:db/seed-dev (D-27). db/seed-demo holds the
+    # non-secret demo services (odoo-erp ...) also used by the container profile (D-64).
+    locations: classpath:db/migration,classpath:db/seed-dev,classpath:db/seed-demo
 
   data:
     redis:
-      url: ${REDIS_URL:redis://:opscenter@localhost:6467}   # DEV-ONLY password (docker-compose REDIS_PASSWORD)
+      url: ${REDIS_URL:redis://:${REDIS_PASSWORD:opscenter}@localhost:${REDIS_PORT:6467}}   # DEV-ONLY password
 
   rabbitmq:
-    addresses: ${RABBITMQ_URL:amqp://opscenter:opscenter@localhost:5672}   # DEV-ONLY credentials
+    addresses: ${RABBITMQ_URL:amqp://${RABBITMQ_DEFAULT_USER:opscenter}:${RABBITMQ_DEFAULT_PASS:opscenter}@localhost:${RABBITMQ_PORT:5672}}   # DEV-ONLY credentials
 
 opscenter:
   security:
     jwt:
       # DEV-ONLY HS256 secret (>= 32 chars). Override with OPSCENTER_JWT_SECRET.
       secret: ${OPSCENTER_JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
+
+  storage:
+    # MinIO of docker-compose.yml, API published on 127.0.0.1:9002 (DEV-ONLY credentials).
+    endpoint: ${OBJECT_STORAGE_ENDPOINT:${MINIO_ENDPOINT:http://localhost:${MINIO_API_PORT:9002}}}
+    access-key: ${OBJECT_STORAGE_ACCESS_KEY:${MINIO_ACCESS_KEY:${MINIO_ROOT_USER:opscenter}}}
+    secret-key: ${OBJECT_STORAGE_SECRET_KEY:${MINIO_SECRET_KEY:${MINIO_ROOT_PASSWORD:opscenter123}}}
+
+  system:
+    probes:
+      prometheus-url: ${OPSCENTER_PROMETHEUS_URL:http://localhost:9090}
+      alertmanager-url: ${OPSCENTER_ALERTMANAGER_URL:http://localhost:9093}
 
 logging:
   level:

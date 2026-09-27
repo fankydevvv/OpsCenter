@@ -1,9 +1,11 @@
 # ---------------------------------------------------------------------------
 # Profile "test" - automated tests only.
 #
-# There is NO datasource URL here on purpose: every integration test gets its
-# PostgreSQL (and RabbitMQ) from Testcontainers through @ServiceConnection, so a
-# test can never migrate the developer database on localhost:5433.
+# There is NO datasource URL, Redis URL or object-storage endpoint here on
+# purpose: every integration test gets PostgreSQL, Redis and MinIO (and RabbitMQ
+# where needed) from Testcontainers (@ServiceConnection / DynamicPropertyRegistrar,
+# see com.opscenter.support), so a test can never touch the developer's services
+# on localhost:5433 / 6467 / 9002.
 # ---------------------------------------------------------------------------
 spring:
   jpa:
@@ -11,15 +13,20 @@ spring:
       ddl-auto: validate
   flyway:
     enabled: true
-    # Tests need the four DEV accounts of 07-TC §5 as fixtures (D-27).
-    locations: classpath:db/migration,classpath:db/seed-dev
+    # Tests need the four DEV accounts of 07-TC §5 as fixtures (D-27) and the demo
+    # services of db/seed-demo (odoo-erp ..., D-64).
+    locations: classpath:db/migration,classpath:db/seed-dev,classpath:db/seed-demo
+  rabbitmq:
+    # Only the contexts importing RabbitTestcontainersConfiguration have a broker; their
+    # @ServiceConnection overrides this. Everywhere else the address is unroutable on purpose
+    # (port 1 = connection refused at once), so nothing ever reaches the developer's
+    # RabbitMQ on localhost:5672 and "broker down" is deterministic.
+    addresses: amqp://guest:guest@127.0.0.1:1
 
 management:
   health:
-    redis:
-      enabled: false    # Redis is not used by the base and not started in tests
     rabbit:
-      enabled: false    # only OutboxRelayIT starts a broker
+      enabled: false    # only the RabbitMQ contexts have a broker; see RabbitTestcontainersConfiguration
 
 opscenter:
   security:
@@ -31,6 +38,15 @@ opscenter:
   idempotency:
     purge:
       enabled: false    # tests call IdempotencyKeyStore.purgeExpired() explicitly
+  integration:
+    alertmanager:
+      token: test-only-alertmanager-token-0123456789abcdef
+  system:
+    probes:
+      # No Prometheus/Alertmanager in tests: the probes report UNKNOWN (tests of the HTTP
+      # probes use their own in-process stub server).
+      prometheus-url: ""
+      alertmanager-url: ""
 
 logging:
   level:

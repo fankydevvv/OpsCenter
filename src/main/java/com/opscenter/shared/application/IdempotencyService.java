@@ -3,6 +3,7 @@ package com.opscenter.shared.application;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Optional;
@@ -47,7 +48,9 @@ import tools.jackson.databind.json.JsonMapper;
  * </ol>
  * Internal API calls use {@code integration_id = NULL} and the key is namespaced by the calling
  * user ({@code <actorId>:<key>}), so one user can neither probe nor replay another user's keys.
- * The Alertmanager webhook of Sprint 2 will pass its integration id instead.
+ * The Alertmanager webhook of Sprint 2 passes its integration source id instead, together with a
+ * shorter TTL (15 min, blueprint D-43): long enough to absorb Alertmanager's retry backoff, short
+ * enough that its periodic re-notification is counted as a new occurrence.
  */
 @Service
 public class IdempotencyService {
@@ -83,15 +86,26 @@ public class IdempotencyService {
      */
     public <T> IdempotentResult<T> execute(UUID integrationId, String idempotencyKey, String requestHash,
                                            String resourceType, IdempotentOperation<T> operation) {
+        return execute(integrationId, idempotencyKey, requestHash, resourceType, null, operation);
+    }
+
+    /**
+     * Same as {@link #execute(UUID, String, String, String, IdempotentOperation)} with an explicit
+     * key lifetime (blueprint D-43: webhook deliveries keep their key for 15 minutes only).
+     *
+     * @param ttl how long a completed key replays its answer; {@code null} = {@code opscenter.idempotency.ttl}
+     */
+    public <T> IdempotentResult<T> execute(UUID integrationId, String idempotencyKey, String requestHash,
+                                           String resourceType, Duration ttl, IdempotentOperation<T> operation) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             return transactions.execute(status -> IdempotentResult.created(operation.create()));
         }
 
-        IdempotencyKeyEntity claim = claim(integrationId, idempotencyKey, requestHash, resourceType);
+        IdempotencyKeyEntity claim = claim(integrationId, idempotencyKey, requestHash, resourceType, ttl);
         if (claim == null) {
             IdempotencyKeyEntity existing = store.find(integrationId, idempotencyKey)
                     .orElseThrow(() -> new IllegalStateException("Idempotency key vanished after duplicate insert"));
-            return handleExisting(existing, requestHash, resourceType, operation);
+            return handleExisting(existing, requestHash, resourceType, ttl, operation);
         }
         return runAndComplete(claim.getId(), operation);
     }
@@ -108,9 +122,10 @@ public class IdempotencyService {
         }
     }
 
-    private IdempotencyKeyEntity claim(UUID integrationId, String key, String requestHash, String resourceType) {
+    private IdempotencyKeyEntity claim(UUID integrationId, String key, String requestHash, String resourceType,
+                                       Duration ttl) {
         try {
-            return store.insertInProgress(integrationId, key, requestHash, resourceType);
+            return store.insertInProgress(integrationId, key, requestHash, resourceType, ttl);
         }
         catch (DataIntegrityViolationException duplicate) {
             log.debug("Idempotency key {} already claimed", key);
@@ -119,11 +134,23 @@ public class IdempotencyService {
     }
 
     private <T> IdempotentResult<T> handleExisting(IdempotencyKeyEntity existing, String requestHash,
-                                                   String resourceType, IdempotentOperation<T> operation) {
+                                                   String resourceType, Duration ttl,
+                                                   IdempotentOperation<T> operation) {
         if (existing.getStatus() == IdempotencyStatus.FAILED || isExpired(existing)) {
-            // A failed or expired key is free again: the new attempt takes it over with its own hash.
-            store.reclaim(existing.getId(), requestHash, resourceType);
-            return runAndComplete(existing.getId(), operation);
+            // A failed or expired key is free again: the new attempt takes it over with its own hash -
+            // atomically, so of two concurrent retries only one runs the operation.
+            if (store.reclaim(existing.getId(), requestHash, resourceType, ttl)) {
+                return runAndComplete(existing.getId(), operation);
+            }
+            // Lost the takeover: the winner now holds the key (IN_PROGRESS -> 409) or finished it
+            // (COMPLETED -> replay). Judge the fresh state - never run the operation a second time.
+            IdempotencyKeyEntity current = store.find(existing.getIntegrationId(), existing.getIdempotencyKey())
+                    .orElseThrow(() -> new IllegalStateException("Idempotency key vanished during reclaim"));
+            if (current.getStatus() == IdempotencyStatus.FAILED || isExpired(current)) {
+                throw new ConflictException(ErrorCodes.IDEMPOTENCY_IN_PROGRESS,
+                        "A request with the same Idempotency-Key is being retried concurrently");
+            }
+            return handleExisting(current, requestHash, resourceType, ttl, operation);
         }
         if (!sameHash(existing.getRequestHash(), requestHash)) {
             throw new BusinessRuleException(ErrorCodes.IDEMPOTENCY_KEY_REUSED,
